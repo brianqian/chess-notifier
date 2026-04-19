@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chess-notifier",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "triggers": {
+    // 13:00 UTC daily = 9am ET / 6am PT. Tweak as needed.
+    "crons": ["0 13 * * *"],
+  },
+  "kv_namespaces": [
+    {
+      "binding": "STATE",
+      "id": "866a4effa1ca46bc8ad5ae68397a784e",
+    },
+  ],
+  "vars": {
+    "CHESS_USERNAME": "bqian",
+    "EMAIL_TO": "qian.brian@gmail.com",
+    "EMAIL_FROM": "Chess Notifier <onboarding@resend.dev>",
+  },
+  "observability": {
+    "enabled": true,
+  },
+}
