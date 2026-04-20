@@ -1,4 +1,4 @@
-import type { ChessComGame } from "./chess";
+import type { ChessComGame } from './chess';
 
 export type ImportedGame = {
   game: ChessComGame;
@@ -13,20 +13,17 @@ export type EmailEnv = {
 };
 
 const escapeHtml = (s: string) =>
-  s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+  s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!
   );
 
 function renderGame(imported: ImportedGame, username: string): string {
   const { game, lichessUrl } = imported;
-  const me =
-    game.white.username.toLowerCase() === username.toLowerCase()
-      ? game.white
-      : game.black;
+  const me = game.white.username.toLowerCase() === username.toLowerCase() ? game.white : game.black;
   const opp = me === game.white ? game.black : game.white;
-  const label =
-    me.result === "win" ? "Won" : opp.result === "win" ? "Lost" : "Draw";
-  const color = me === game.white ? "White" : "Black";
+  const label = me.result === 'win' ? 'Won' : opp.result === 'win' ? 'Lost' : 'Draw';
+  const color = me === game.white ? 'White' : 'Black';
   const date = new Date(game.end_time * 1000).toISOString().slice(0, 10);
 
   return `
@@ -41,21 +38,18 @@ function renderGame(imported: ImportedGame, username: string): string {
   `;
 }
 
-export async function sendEmail(
-  env: EmailEnv,
-  imported: ImportedGame[],
-): Promise<void> {
-  const html = imported.map((i) => renderGame(i, env.CHESS_USERNAME)).join("");
+export async function sendEmail(env: EmailEnv, imported: ImportedGame[]): Promise<void> {
+  const html = imported.map((i) => renderGame(i, env.CHESS_USERNAME)).join('');
   const subject =
     imported.length === 1
-      ? "New chess game ready for analysis"
+      ? 'New chess game ready for analysis'
       : `${imported.length} new chess games ready for analysis`;
 
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
     headers: {
       Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       from: env.EMAIL_FROM,
@@ -66,7 +60,7 @@ export async function sendEmail(
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = await res.text().catch(() => '');
     throw new Error(`resend failed ${res.status}: ${text.slice(0, 200)}`);
   }
 }

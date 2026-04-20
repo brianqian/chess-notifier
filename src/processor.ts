@@ -1,9 +1,9 @@
-import { fetchRecentGames } from "./chess";
-import { importToLichess } from "./lichess";
-import { sendEmail, type ImportedGame } from "./email";
-import type { Env } from "./env";
+import { fetchRecentGames } from './chess';
+import { importToLichess } from './lichess';
+import { sendEmail, type ImportedGame } from './email';
+import type { Env } from './env';
 
-const SEEN_KEY = "seen_uuids";
+const SEEN_KEY = 'seen_uuids';
 const MAX_SEEN = 200;
 const IMPORT_DELAY_MS = 1500;
 
@@ -18,7 +18,7 @@ export type RunSummary = {
 };
 
 export async function processNewGames(env: Env): Promise<RunSummary> {
-  const seenJson = (await env.STATE.get(SEEN_KEY)) ?? "[]";
+  const seenJson = (await env.STATE.get(SEEN_KEY)) ?? '[]';
   const seen: string[] = JSON.parse(seenJson);
   const seenSet = new Set(seen);
 
@@ -36,7 +36,7 @@ export async function processNewGames(env: Env): Promise<RunSummary> {
       seenSet.add(game.uuid);
     } catch (err) {
       failed++;
-      console.error("lichess import failed", game.uuid, err);
+      console.error('lichess import failed', game.uuid, err);
     }
   }
 
@@ -46,7 +46,7 @@ export async function processNewGames(env: Env): Promise<RunSummary> {
       await sendEmail(env, imported);
       emailed = true;
     } catch (err) {
-      console.error("email send failed", err);
+      console.error('email send failed', err);
     }
   }
 

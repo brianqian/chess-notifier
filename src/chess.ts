@@ -16,18 +16,16 @@ export type ChessComGame = {
   black: ChessComPlayer;
 };
 
-const UA = "chess-notifier (personal, contact: qian.brian@gmail.com)";
+const UA = 'chess-notifier (personal, contact: qian.brian@gmail.com)';
 
-export async function fetchRecentGames(
-  username: string,
-): Promise<ChessComGame[]> {
+export async function fetchRecentGames(username: string): Promise<ChessComGame[]> {
   const archivesRes = await fetch(
     `https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/archives`,
-    { headers: { "User-Agent": UA } },
+    { headers: { 'User-Agent': UA } }
   );
   if (!archivesRes.ok) {
     throw new Error(
-      `chess.com archives fetch failed: ${archivesRes.status} ${archivesRes.statusText}`,
+      `chess.com archives fetch failed: ${archivesRes.status} ${archivesRes.statusText}`
     );
   }
   const { archives } = (await archivesRes.json()) as { archives: string[] };
@@ -36,7 +34,7 @@ export async function fetchRecentGames(
 
   const games: ChessComGame[] = [];
   for (const url of recent) {
-    const res = await fetch(url, { headers: { "User-Agent": UA } });
+    const res = await fetch(url, { headers: { 'User-Agent': UA } });
     if (!res.ok) continue;
     const data = (await res.json()) as { games: ChessComGame[] };
     games.push(...data.games);
