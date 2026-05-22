@@ -11,7 +11,8 @@ function renderRow(row: RecentRow, username: string): string {
   const { game: g, lichessUrl, status } = row;
   const me = g.white.username.toLowerCase() === username.toLowerCase() ? g.white : g.black;
   const opp = me === g.white ? g.black : g.white;
-  const label = me.result === 'win' ? 'Won' : opp.result === 'win' ? 'Lost' : 'Draw';
+  const outcome = me.result === 'win' ? 'won' : opp.result === 'win' ? 'lost' : 'draw';
+  const label = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : 'Draw';
   const color = me === g.white ? 'White' : 'Black';
   const link =
     lichessUrl && status === 'imported'
@@ -19,7 +20,7 @@ function renderRow(row: RecentRow, username: string): string {
       : `<a href="${safeHref(g.url)}">chess.com</a> <span class="pending">queued (1/min)</span>`;
   return `<tr data-end="${g.end_time}">
     <td class="when"></td>
-    <td><strong>${label}</strong></td>
+    <td><strong class="result result-${outcome}">${label}</strong></td>
     <td>${color}</td>
     <td>${escapeHtml(opp.username)} (${opp.rating})</td>
     <td>${escapeHtml(g.time_class)}</td>
@@ -50,6 +51,11 @@ export function renderRecentPage(
     <style>
       body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 16px}
       .pending{color:#92580a;font-size:12px;display:inline-block;margin-left:6px}
+      tbody tr{transition:background-color .1s ease}
+      tbody tr:hover{background-color:#f3f4f6}
+      .result-won{color:#1a7f37}
+      .result-lost{color:#cf222e}
+      .result-draw{color:#57606a}
     </style>
     </head><body>
     <h1>Last ${hours}h of games — ${escapeHtml(username)}</h1>

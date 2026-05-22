@@ -20,22 +20,27 @@ export type EmailEnv = {
 const formatGameDate = (endTimeSeconds: number) =>
   format(fromUnixTime(endTimeSeconds), 'yyyy-MM-dd');
 
+const RESULT_COLORS = { won: '#1a7f37', lost: '#cf222e', draw: '#57606a' } as const;
+
 function pickSides(g: ChessComGame, username: string) {
   const me = g.white.username.toLowerCase() === username.toLowerCase() ? g.white : g.black;
   const opp = me === g.white ? g.black : g.white;
-  const label = me.result === 'win' ? 'Won' : opp.result === 'win' ? 'Lost' : 'Draw';
+  const outcome: 'won' | 'lost' | 'draw' =
+    me.result === 'win' ? 'won' : opp.result === 'win' ? 'lost' : 'draw';
+  const label = outcome === 'won' ? 'Won' : outcome === 'lost' ? 'Lost' : 'Draw';
   const color = me === g.white ? 'White' : 'Black';
-  return { me, opp, label, color };
+  const labelHtml = `<strong style="color:${RESULT_COLORS[outcome]}">${label}</strong>`;
+  return { me, opp, label, labelHtml, color, outcome };
 }
 
 function renderGame(imported: ImportedGame, username: string): string {
   const { game, lichessUrl } = imported;
-  const { opp, label, color } = pickSides(game, username);
+  const { opp, labelHtml, color } = pickSides(game, username);
   const date = formatGameDate(game.end_time);
 
   return `
     <p style="margin:0 0 16px">
-      <strong>${label}</strong> as ${color} vs
+      ${labelHtml} as ${color} vs
       ${escapeHtml(opp.username)} (${opp.rating})
       &middot; ${escapeHtml(game.time_class)} &middot; ${date}<br>
       <a href="${safeHref(lichessUrl)}">Lichess analysis</a>
@@ -62,10 +67,10 @@ function renderRateLimitedSection(
   if (rateLimited.length === 0) return '';
   const list = rateLimited
     .map((g) => {
-      const { opp, label, color } = pickSides(g, username);
+      const { opp, labelHtml, color } = pickSides(g, username);
       const date = formatGameDate(g.end_time);
       return `<li>
-        <strong>${label}</strong> as ${color} vs ${escapeHtml(opp.username)} (${opp.rating})
+        ${labelHtml} as ${color} vs ${escapeHtml(opp.username)} (${opp.rating})
         &middot; ${escapeHtml(g.time_class)} &middot; ${date}
         &middot; <a href="${safeHref(g.url)}">Chess.com game</a>
       </li>`;
