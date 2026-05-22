@@ -133,6 +133,36 @@ export type DrainResult =
   | { status: 'failed'; uuid: string; error: string }
   | { status: 'missing_pgn'; uuid: string };
 
+// Cap chosen to fit the Workers waitUntil budget: 8 × IMPORT_DELAY_MS + import RTT ≈ 13s.
+const DRAIN_BATCH_MAX = 8;
+
+export type DrainBatchResult = {
+  processed: number;
+  stopped: 'empty' | 'rate_limited' | 'failed' | 'batch_limit';
+  lastResult?: DrainResult;
+};
+
+export async function drainQueue(env: Env): Promise<DrainBatchResult> {
+  let processed = 0;
+  let lastResult: DrainResult | undefined;
+  for (let i = 0; i < DRAIN_BATCH_MAX; i++) {
+    if (i > 0) await sleep(IMPORT_DELAY_MS);
+    const result = await drainOneFromQueue(env);
+    lastResult = result;
+    if (result.status === 'empty') return { processed, stopped: 'empty', lastResult };
+    if (result.status === 'rate_limited') {
+      // Next minute-cron tick will be ~60s later — past Lichess's worst-case cooldown.
+      return { processed, stopped: 'rate_limited', lastResult };
+    }
+    processed++;
+    if (result.status === 'failed') {
+      // Dropped from queue; keep going so one bad PGN doesn't block the rest.
+      continue;
+    }
+  }
+  return { processed, stopped: 'batch_limit', lastResult };
+}
+
 export async function drainOneFromQueue(env: Env): Promise<DrainResult> {
   const next = await popNext(env.STATE);
   if (!next) return { status: 'empty' };

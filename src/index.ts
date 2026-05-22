@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getUnixTime, subHours } from 'date-fns';
-import { processNewGames, drainOneFromQueue } from './processor';
+import { processNewGames, drainQueue } from './processor';
 import { fetchGamesSince } from './chess';
 import { getCachedLichessUrl } from './cache';
 import { enqueueGames, getQueue } from './queue';
@@ -40,11 +40,11 @@ app.get('/queue', async (c) => {
 app.get('/retry', async (c) => {
   if (!checkKey(c)) return unauthorized(c);
   const queue = await getQueue(c.env.STATE);
-  // The minute cron drains 1/min; nudge the very next one immediately.
-  c.executionCtx.waitUntil(drainOneFromQueue(c.env));
+  // Kick a burst drain in the background; minute cron handles anything left over.
+  c.executionCtx.waitUntil(drainQueue(c.env));
   return c.json({
     queued: queue.length,
-    note: 'Queue drains at 1 import per minute via the scheduled job.',
+    note: 'Bursting now; remaining games drain at the minute cron tick.',
   });
 });
 
@@ -91,8 +91,8 @@ async function runDailyCron(env: Env): Promise<void> {
 
 async function runDrainCron(env: Env): Promise<void> {
   try {
-    const result = await drainOneFromQueue(env);
-    if (result.status !== 'empty') console.log('drain', result);
+    const result = await drainQueue(env);
+    if (result.processed > 0 || result.stopped !== 'empty') console.log('drain', result);
   } catch (err) {
     console.error('drain error', err);
   }

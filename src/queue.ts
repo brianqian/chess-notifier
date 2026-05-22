@@ -65,6 +65,9 @@ export async function popNext(state: KVNamespace): Promise<DequeuedGame | null> 
 
 export async function requeueHead(state: KVNamespace, game: DequeuedGame): Promise<void> {
   const queue = await readQueue(state);
+  // Always restore the PGN — popNext deleted it, and a concurrent enqueue may have
+  // re-added the uuid without its PGN if the cache had been populated and then cleared.
   await state.put(PGN_PREFIX + game.uuid, game.pgn, { expirationTtl: PGN_TTL_SECONDS });
+  if (queue.some((e) => e.uuid === game.uuid)) return;
   await writeQueue(state, [{ uuid: game.uuid, addedAt: getUnixTime(new Date()) }, ...queue]);
 }
