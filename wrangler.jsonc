@@ -4,8 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-01-01",
   "triggers": {
-    // 13:00 UTC daily = 9am ET / 6am PT. Tweak as needed.
-    "crons": ["0 13 * * *"],
+    // 13:00 UTC daily = 9am ET / 6am PT. Main run.
+    // "* * * * *" drains the retry queue at 1/min when there are rate-limited games.
+    "crons": ["0 13 * * *", "* * * * *"],
   },
   "kv_namespaces": [
     {
@@ -17,6 +18,8 @@
     "CHESS_USERNAME": "bqian",
     "EMAIL_TO": "qian.brian@gmail.com",
     "EMAIL_FROM": "Chess Notifier <onboarding@resend.dev>",
+    // Public base URL for this worker; used to build the "last 24h" link in emails.
+    "PUBLIC_URL": "https://chess-notifier.<your-subdomain>.workers.dev",
   },
   "observability": {
     "enabled": true,

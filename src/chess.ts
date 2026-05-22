@@ -1,3 +1,5 @@
+import { differenceInCalendarDays, fromUnixTime } from 'date-fns';
+
 export type ChessComPlayer = {
   username: string;
   rating: number;
@@ -18,7 +20,10 @@ export type ChessComGame = {
 
 const UA = 'chess-notifier (personal, contact: qian.brian@gmail.com)';
 
-export async function fetchRecentGames(username: string): Promise<ChessComGame[]> {
+export async function fetchRecentGames(
+  username: string,
+  archiveMonths = 2
+): Promise<ChessComGame[]> {
   const archivesRes = await fetch(
     `https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/archives`,
     { headers: { 'User-Agent': UA } }
@@ -29,8 +34,7 @@ export async function fetchRecentGames(username: string): Promise<ChessComGame[]
     );
   }
   const { archives } = (await archivesRes.json()) as { archives: string[] };
-  // Pull last two monthly archives to cover month rollover.
-  const recent = archives.slice(-2);
+  const recent = archives.slice(-Math.max(1, archiveMonths));
 
   const games: ChessComGame[] = [];
   for (const url of recent) {
@@ -41,4 +45,12 @@ export async function fetchRecentGames(username: string): Promise<ChessComGame[]
   }
   games.sort((a, b) => a.end_time - b.end_time);
   return games;
+}
+
+export async function fetchGamesSince(username: string, sinceUnix: number): Promise<ChessComGame[]> {
+  const windowDays = Math.max(1, differenceInCalendarDays(new Date(), fromUnixTime(sinceUnix)));
+  // +1 covers calendar-boundary edges (e.g., a 30d window crossing a month start).
+  const months = Math.ceil(windowDays / 30) + 1;
+  const games = await fetchRecentGames(username, months);
+  return games.filter((g) => g.end_time >= sinceUnix);
 }

@@ -6,4 +6,5 @@ export type Env = {
   RESEND_API_KEY: string;
   TRIGGER_SECRET: string;
   LICHESS_TOKEN?: string;
+  PUBLIC_URL?: string;
 };
