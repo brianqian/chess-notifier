@@ -1,6 +1,7 @@
-import { fetchRecentGames, type ChessComGame } from './chess';
+import { getUnixTime, subHours, startOfDay } from 'date-fns';
+import { fetchGamesSince, type ChessComGame } from './chess';
 import { importToLichess, LichessImportError } from './lichess';
-import { sendEmail, type ImportedGame } from './email';
+import { sendEmail, type GameRow } from './email';
 import { getCachedLichessUrl, setCachedLichessUrl } from './cache';
 import { enqueueGames, popNext, requeueHead } from './queue';
 import {
@@ -12,118 +13,104 @@ import {
 } from './ratings';
 import type { Env } from './env';
 
-const SEEN_KEY = 'seen_uuids';
-const MAX_SEEN = 200;
+const REPORT_WINDOW_HOURS = 24;
 const IMPORT_DELAY_MS = 1500;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type RunSummary = {
-  found: number;
-  new: number;
-  imported: number;
-  failed: number;
-  rateLimited: number;
-  alreadyImported: number;
+  games: number;
+  alreadyCached: number;
+  freshlyImported: number;
+  queued: number;
   emailed: boolean;
 };
 
-export async function processNewGames(env: Env): Promise<RunSummary> {
-  const seenJson = (await env.STATE.get(SEEN_KEY)) ?? '[]';
-  const seen: string[] = JSON.parse(seenJson);
-  const seenSet = new Set(seen);
+export async function processDailyReport(env: Env): Promise<RunSummary> {
+  const since = getUnixTime(subHours(new Date(), REPORT_WINDOW_HOURS));
+  const games = await fetchGamesSince(env.CHESS_USERNAME, since);
+  games.sort((a, b) => a.end_time - b.end_time);
 
-  const games = await fetchRecentGames(env.CHESS_USERNAME);
-  const newGames = games.filter((g) => !seenSet.has(g.uuid));
-
-  const imported: ImportedGame[] = [];
-  const rateLimited: ChessComGame[] = [];
-  let failed = 0;
-  let alreadyImported = 0;
+  const rows: GameRow[] = [];
+  const toEnqueue: { uuid: string; pgn: string }[] = [];
+  let alreadyCached = 0;
+  let freshlyImported = 0;
   let bailed = false;
   let firstImport = true;
-  for (const game of newGames) {
-    // If we already have a Lichess URL cached (e.g. from a manual /retry or /recent), don't
-    // re-import or re-email — just reconcile by marking as seen.
-    const cachedUrl = await getCachedLichessUrl(env.STATE, game.uuid);
-    if (cachedUrl) {
-      seenSet.add(game.uuid);
-      alreadyImported++;
+
+  for (const game of games) {
+    const cached = await getCachedLichessUrl(env.STATE, game.uuid);
+    if (cached) {
+      rows.push({ game, lichessUrl: cached });
+      alreadyCached++;
       continue;
     }
 
     if (bailed) {
-      rateLimited.push(game);
+      toEnqueue.push({ uuid: game.uuid, pgn: game.pgn });
+      rows.push({ game, lichessUrl: null });
       continue;
     }
+
     if (!firstImport) await sleep(IMPORT_DELAY_MS);
     firstImport = false;
     try {
       const { url } = await importToLichess(game.pgn, env.LICHESS_TOKEN);
-      imported.push({ game, lichessUrl: url });
-      seenSet.add(game.uuid);
       await setCachedLichessUrl(env.STATE, game.uuid, url);
+      rows.push({ game, lichessUrl: url });
+      freshlyImported++;
     } catch (err) {
       if (err instanceof LichessImportError && err.status === 429) {
-        rateLimited.push(game);
         bailed = true;
-        console.error('lichess rate-limited, enqueueing remaining games for retry', game.uuid);
+        toEnqueue.push({ uuid: game.uuid, pgn: game.pgn });
+        rows.push({ game, lichessUrl: null });
+        console.warn('lichess rate-limited; enqueueing the rest of the window', game.uuid);
       } else {
-        failed++;
         console.error('lichess import failed', game.uuid, err);
+        rows.push({ game, lichessUrl: null });
       }
     }
   }
 
-  if (rateLimited.length > 0) {
-    await enqueueGames(
-      env.STATE,
-      rateLimited.map((g) => ({ uuid: g.uuid, pgn: g.pgn }))
-    );
+  if (toEnqueue.length > 0) {
+    await enqueueGames(env.STATE, toEnqueue);
   }
 
   let emailed = false;
-  if (imported.length > 0 || rateLimited.length > 0) {
-    const now = new Date();
-    const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const classesToday = timeClassesPlayedSince(games, todayStart);
-    const statsByClass: Partial<Record<TimeClass, RatingStats>> = {};
-    const statsEntries = await Promise.all(
-      classesToday.map(
-        async (tc) =>
-          [tc, await fetchRatingStats(env.CHESS_USERNAME, tc, 30).catch(() => null)] as const
-      )
-    );
-    for (const [tc, stats] of statsEntries) {
-      if (stats) statsByClass[tc] = stats;
-    }
-    const todaySummaries = summarizeToday(games, env.CHESS_USERNAME);
-
+  if (rows.length > 0) {
+    const ratingContext = await buildRatingContext(env, games);
     try {
-      await sendEmail(env, imported, rateLimited, { statsByClass, todaySummaries });
+      await sendEmail(env, rows, ratingContext);
       emailed = true;
     } catch (err) {
       console.error('email send failed', err);
     }
   }
 
-  // Persist seen set (bounded to MAX_SEEN, most recent games kept).
-  // Rate-limited games are intentionally NOT marked seen so they remain visible to retry/recovery flows.
-  if (newGames.length > 0) {
-    const merged = [...seen.filter((u) => seenSet.has(u)), ...imported.map((i) => i.game.uuid)];
-    const trimmed = merged.slice(-MAX_SEEN);
-    await env.STATE.put(SEEN_KEY, JSON.stringify(trimmed));
-  }
-
   return {
-    found: games.length,
-    new: newGames.length,
-    imported: imported.length,
-    failed,
-    rateLimited: rateLimited.length,
-    alreadyImported,
+    games: games.length,
+    alreadyCached,
+    freshlyImported,
+    queued: toEnqueue.length,
     emailed,
   };
+}
+
+async function buildRatingContext(env: Env, games: ChessComGame[]) {
+  const todayStart = getUnixTime(startOfDay(new Date())) * 1000;
+  const classesToday = timeClassesPlayedSince(games, todayStart);
+  const statsEntries = await Promise.all(
+    classesToday.map(
+      async (tc) =>
+        [tc, await fetchRatingStats(env.CHESS_USERNAME, tc, 30).catch(() => null)] as const
+    )
+  );
+  const statsByClass: Partial<Record<TimeClass, RatingStats>> = {};
+  for (const [tc, stats] of statsEntries) {
+    if (stats) statsByClass[tc] = stats;
+  }
+  const todaySummaries = summarizeToday(games, env.CHESS_USERNAME);
+  return { statsByClass, todaySummaries };
 }
 
 export type DrainResult =
@@ -155,10 +142,7 @@ export async function drainQueue(env: Env): Promise<DrainBatchResult> {
       return { processed, stopped: 'rate_limited', lastResult };
     }
     processed++;
-    if (result.status === 'failed') {
-      // Dropped from queue; keep going so one bad PGN doesn't block the rest.
-      continue;
-    }
+    if (result.status === 'failed') continue;
   }
   return { processed, stopped: 'batch_limit', lastResult };
 }

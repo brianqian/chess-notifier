@@ -3,9 +3,9 @@ import { escapeHtml, safeHref } from './html';
 import type { ChessComGame } from './chess';
 import { TIME_CLASSES, type RatingStats, type TimeClass, type TodaySummary } from './ratings';
 
-export type ImportedGame = {
+export type GameRow = {
   game: ChessComGame;
-  lichessUrl: string;
+  lichessUrl: string | null;
 };
 
 export type EmailEnv = {
@@ -33,17 +33,20 @@ function pickSides(g: ChessComGame, username: string) {
   return { me, opp, label, labelHtml, color, outcome };
 }
 
-function renderGame(imported: ImportedGame, username: string): string {
-  const { game, lichessUrl } = imported;
+function renderGameRow(row: GameRow, username: string): string {
+  const { game, lichessUrl } = row;
   const { opp, labelHtml, color } = pickSides(game, username);
   const date = formatGameDate(game.end_time);
+  const primaryLink = lichessUrl
+    ? `<a href="${safeHref(lichessUrl)}">Lichess analysis</a>`
+    : `<span style="color:#92580a;font-size:13px">queued for import</span>`;
 
   return `
     <p style="margin:0 0 16px">
       ${labelHtml} as ${color} vs
       ${escapeHtml(opp.username)} (${opp.rating})
       &middot; ${escapeHtml(game.time_class)} &middot; ${date}<br>
-      <a href="${safeHref(lichessUrl)}">Lichess analysis</a>
+      ${primaryLink}
       &middot;
       <a href="${safeHref(game.url)}">Chess.com game</a>
     </p>
@@ -59,39 +62,17 @@ function renderRecentLink(env: EmailEnv): string {
   </p>`;
 }
 
-function renderRateLimitedSection(
-  env: EmailEnv,
-  rateLimited: ChessComGame[],
-  username: string
-): string {
-  if (rateLimited.length === 0) return '';
-  const list = rateLimited
-    .map((g) => {
-      const { opp, labelHtml, color } = pickSides(g, username);
-      const date = formatGameDate(g.end_time);
-      return `<li>
-        ${labelHtml} as ${color} vs ${escapeHtml(opp.username)} (${opp.rating})
-        &middot; ${escapeHtml(g.time_class)} &middot; ${date}
-        &middot; <a href="${safeHref(g.url)}">Chess.com game</a>
-      </li>`;
-    })
-    .join('');
-
-  let retryLink = '';
+function renderQueuedNotice(env: EmailEnv, queuedCount: number): string {
+  if (queuedCount === 0) return '';
+  let kickLink = '';
   if (env.PUBLIC_URL && env.TRIGGER_SECRET) {
     const base = env.PUBLIC_URL.replace(/\/$/, '');
     const href = `${base}/retry?key=${encodeURIComponent(env.TRIGGER_SECRET)}`;
-    retryLink = `<p style="margin:8px 0 0;font-size:14px">
-      <a href="${safeHref(href)}">Kick the retry job now</a>
-      (these are queued and auto-retried at 1/min; the link just nudges the next import).
-    </p>`;
+    kickLink = ` &middot; <a href="${safeHref(href)}">kick the retry job</a>`;
   }
-
-  return `<div style="margin:24px 0 0;padding:12px 14px;background:#fff4e5;border-left:3px solid #d97706">
-    <p style="margin:0 0 8px"><strong>${rateLimited.length} game${rateLimited.length === 1 ? '' : 's'} queued for retry — Lichess rate limit hit.</strong></p>
-    <ul style="margin:0 0 0 20px;padding:0">${list}</ul>
-    ${retryLink}
-  </div>`;
+  return `<p style="margin:24px 0 0;padding:10px 14px;background:#fff4e5;border-left:3px solid #d97706;font-size:13px">
+    ${queuedCount} game${queuedCount === 1 ? '' : 's'} queued for import — Lichess rate limit. Auto-retries at up to 8/min${kickLink}.
+  </p>`;
 }
 
 export type RatingContext = {
@@ -110,11 +91,7 @@ function formatRecord(s: TodaySummary): string {
   return parts.join('-');
 }
 
-function buildSubject(
-  imported: ImportedGame[],
-  rateLimited: ChessComGame[],
-  todaySummaries: TodaySummary[]
-): string {
+function buildSubject(rows: GameRow[], todaySummaries: TodaySummary[]): string {
   if (todaySummaries.length > 0) {
     const parts = todaySummaries.map((s) => {
       // For N=1 games today with no next-game lookahead, delta is 0 because we have
@@ -127,10 +104,7 @@ function buildSubject(
     });
     return `${SUBJECT_PREFIX} ${parts.join(' · ')}`;
   }
-  if (imported.length === 0) {
-    return `${SUBJECT_PREFIX} ${rateLimited.length} game${rateLimited.length === 1 ? '' : 's'} queued (Lichess rate limit)`;
-  }
-  return `${SUBJECT_PREFIX} ${imported.length} new game${imported.length === 1 ? '' : 's'}`;
+  return `${SUBJECT_PREFIX} ${rows.length} game${rows.length === 1 ? '' : 's'} in the last 24h`;
 }
 
 function renderSparklineCell(
@@ -207,20 +181,23 @@ function renderRatingHeader(ctx: RatingContext): string {
 
 export async function sendEmail(
   env: EmailEnv,
-  imported: ImportedGame[],
-  rateLimited: ChessComGame[] = [],
+  rows: GameRow[],
   ratingContext?: RatingContext
 ): Promise<void> {
-  if (imported.length === 0 && rateLimited.length === 0) return;
+  if (rows.length === 0) return;
+
+  // Newest first in the email body.
+  const ordered = [...rows].sort((a, b) => b.game.end_time - a.game.end_time);
+  const queuedCount = ordered.filter((r) => r.lichessUrl == null).length;
 
   const ratingHeader = ratingContext ? renderRatingHeader(ratingContext) : '';
   const html =
     ratingHeader +
-    imported.map((i) => renderGame(i, env.CHESS_USERNAME)).join('') +
-    renderRateLimitedSection(env, rateLimited, env.CHESS_USERNAME) +
+    ordered.map((r) => renderGameRow(r, env.CHESS_USERNAME)).join('') +
+    renderQueuedNotice(env, queuedCount) +
     renderRecentLink(env);
 
-  const subject = buildSubject(imported, rateLimited, ratingContext?.todaySummaries ?? []);
+  const subject = buildSubject(ordered, ratingContext?.todaySummaries ?? []);
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',

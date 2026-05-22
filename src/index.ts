@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getUnixTime, subHours } from 'date-fns';
-import { processNewGames, drainQueue } from './processor';
+import { processDailyReport, drainQueue } from './processor';
 import { fetchGamesSince } from './chess';
 import { getCachedLichessUrl } from './cache';
 import { enqueueGames, getQueue } from './queue';
@@ -28,7 +28,7 @@ app.get('/', (c) => c.text('chess-notifier ok'));
 
 app.get('/run', async (c) => {
   if (!checkKey(c)) return unauthorized(c);
-  return c.json(await processNewGames(c.env));
+  return c.json(await processDailyReport(c.env));
 });
 
 app.get('/queue', async (c) => {
@@ -82,7 +82,7 @@ app.get('/recent', async (c) => {
 
 async function runDailyCron(env: Env): Promise<void> {
   try {
-    const summary = await processNewGames(env);
+    const summary = await processDailyReport(env);
     console.log('daily cron summary', summary);
   } catch (err) {
     console.error('daily cron error', err);
